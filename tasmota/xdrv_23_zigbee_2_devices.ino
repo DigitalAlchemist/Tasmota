@@ -21,6 +21,7 @@
 
 #ifndef ZIGBEE_SAVE_DELAY_SECONDS
 #define ZIGBEE_SAVE_DELAY_SECONDS 2               // wait for 2s before saving Zigbee info
+#define ZIGBEE_DATA_PIR_OCCUPANCY_BUF_SIZE 48
 #endif
 const uint16_t kZigbeeSaveDelaySeconds = ZIGBEE_SAVE_DELAY_SECONDS;    // wait for x seconds
 
@@ -266,9 +267,7 @@ public:
   Z_Data_PIR(uint8_t endpoint = 0) :
     Z_Data(Z_Data_Type::Z_PIR, endpoint),
     occupancy(0xFF),
-    illuminance(0xFFFF),
-    occupancy_index(0),
-    occupancy_time(0)
+    illuminance(0xFFFF)
     {}
 
   inline bool validOccupancy(void)      const { return 0xFF != occupancy; }
@@ -279,8 +278,8 @@ public:
   
   inline void setOccupancy(uint8_t _occupancy)          { occupancy = _occupancy; }
   inline void setIlluminance(uint16_t _illuminance)     { illuminance = _illuminance; }
-  void setOccupancyIndex(uint8_t value, uint8_t index);
-  inline uint8_t getOccupancyIndex(uint8_t index) const;
+  void setOccupancyAtTime(uint8_t value, uint32_t time);
+  uint8_t getOccupancyAtTime(uint32_t time) const;
 
 
   uint32_t getTimeoutSeconds(void) const;
@@ -290,9 +289,10 @@ public:
   // PIR
   uint8_t               occupancy;      // map8
   uint16_t              illuminance;    // illuminance
-  uint8_t               occupancy_today[48];
-  uint8_t               occupancy_index;
-  uint32_t              occupancy_time;
+
+  // Store the occupancy of the last 24 hours in 15m increments
+  // This array is a series of nibbles indexed at 0, where 0lo == midnight, 47hi == 2345
+  uint8_t               occupancy_24hr[ZIGBEE_DATA_PIR_OCCUPANCY_BUF_SIZE];
 
 };
 
@@ -314,16 +314,17 @@ void Z_Data_PIR::setTimeoutSeconds(int32_t value) {
   }
 }
 
-void Z_Data_PIR::setOccupancyIndex(uint8_t value, uint8_t index) {
-  uint8_t temp;
-  temp = occupancy_today[index / 2];
-  occupancy_today[index / 2] = (temp & (0x0f << (4 * (index % 2)))) | ((value & 0x0f) << (4 * (1 - (index % 2))));
+void Z_Data_PIR::setOccupancyAtTime(uint8_t value, uint32_t time) {
+  // index is the _nibble_ in the occupancy_24hr buffer, hence the need for 2*BUF_SIZE
+  uint16_t index = changeUIntScale(time - time / 900 * 900, 0, 899, 0, (ZIGBEE_DATA_PIR_OCCUPANCY_BUF_SIZE*2)-1);
+  uint8_t temp = occupancy_24hr[index / 2];
+  occupancy_24hr[index / 2] = (temp & (0x0f << (4 * (index % 2)))) | ((value & 0x0f) << (4 * (1 - (index % 2))));
 }
 
-inline uint8_t Z_Data_PIR::getOccupancyIndex(uint8_t index) const {
-  return (occupancy_today[index / 2] >> (4 * (1 - (index % 2)))) & 0x0f;
+uint8_t Z_Data_PIR::getOccupancyAtTime(uint32_t time) const {
+  uint16_t index = changeUIntScale(time - time / 900 * 900, 0, 899, 0, (ZIGBEE_DATA_PIR_OCCUPANCY_BUF_SIZE*2)-1);
+  return (occupancy_24hr[index / 2] & (0x0f << (4 * (index % 2))));
 }
-
 
 /*********************************************************************************************\
  * Device specific: Sensors: temp, humidity, pressure...

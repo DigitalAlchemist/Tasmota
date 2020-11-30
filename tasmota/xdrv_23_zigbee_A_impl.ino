@@ -1639,6 +1639,29 @@ extern "C" {
   }
 } // extern "C"
 
+void fixupOccupancy(void) {
+  // If the "occupied" flag is set on any device, store that.
+  // TODO: What do we do if the occupancy reset value is < 1m? That's handled in a timer.
+  uint32_t zigbee_num = zigbee_devices.devicesSize();
+  if (!zigbee_num) { return; }
+  if (zigbee_num > 255) { zigbee_num = 255; }
+  uint32_t current_time = Rtc.utc_time;
+  for (uint32_t i = 0; i < zigbee_num; i++) {
+    const Z_Device &device = zigbee_devices.devicesAt(i);
+    Z_Data_PIR & pir = (Z_Data_PIR &) device.data.find<Z_Data_PIR>();
+    if(&pir != nullptr){
+      if(current_time % 59 == 0) {
+        // At the end of every minute, update the occupancy counter.
+        uint8_t occupancy = pir.getOccupancyAtTime(current_time) + pir.occupancy;
+        pir.setOccupancyAtTime(occupancy, current_time);
+      }
+      if(current_time % 900 == 0) {
+        // Reset the counter - this number overlaps in the default case (90s).
+        pir.setOccupancyAtTime(pir.occupancy, current_time);
+      }
+    }
+  }
+}
 void ZigbeeShow(bool json)
 {
   if (json) {
@@ -1663,9 +1686,9 @@ void ZigbeeShow(bool json)
       ".bar{display:inline-flex;align-items:flex-end;height:15px;padding:0;font-size:1pt}"
       ".bar i{width:3px;margin-right:1px;border-radius:3px;background-color:#eee;height:100%}"
       ".bar .i0{height:25%%}.bar .i1{height:50%%}.bar .i2{height:75%%}.o30{opacity:.3}"
-      ".v{visibility:visible}.hm{visibility:hidden}.hm .i0{background-color:#eee;opacity:.2}"
-      ".hm .i1{background-color:#d7e2fc}.hm .i2{background-color:#afc4f8}"
-      ".hm .i3{background-color:#86a7f5}.hm .i4{background-color:#5e89f1}"
+      ".v{visibility:visible}.hm{visibility:hidden}"
+      ".hm .i0{background-color:#eee;opacity:.2}.hm .i1{background-color:#d7e2fc}"
+      ".hm .i2{background-color:#afc4f8}.hm .i3{background-color:#86a7f5}"
       "</style>"
     ));
 
@@ -1745,13 +1768,11 @@ void ZigbeeShow(bool json)
       const Z_Data_PIR & pir = device.data.find<Z_Data_PIR>();
       if(&pir != nullptr){
         // 48 bytes * 2 bytes/sample + ' -' + 2 bytes counter (max 96) + '\0'
-        // Set data points array to all ASCII '0' (not null) to make parsing easier.
-        char datapoints[100];
-        memset(&datapoints[0], '0', 96);
-        for(int i = 0; i < pir.occupancy_index/2; ++i) {
-          snprintf_P(&datapoints[i], 2, PSTR("%02x"), i);
+        char datapoints[ZIGBEE_DATA_PIR_OCCUPANCY_BUF_SIZE*2 + 2 + 2 + 1];
+        for(int i = 0; i < ZIGBEE_DATA_PIR_OCCUPANCY_BUF_SIZE; ++i) {
+          snprintf_P(&datapoints[i], 2, PSTR("%02x"), pir.occupancy_24hr[i]);
         }
-        snprintf_P(&datapoints[96], 5, PSTR(" -%d"), pir.occupancy_index/2);
+        snprintf_P(&datapoints[ZIGBEE_DATA_PIR_OCCUPANCY_BUF_SIZE*2], 5, PSTR(" -%d"), 0 /* TODO: Calculate index, not 0 */);
         WSContentSend_P(PSTR("<tr class='htr'><td colspan=\"4\">&#9478;"));
         WSContentSend_PD(PSTR("<div class='bar hm'>%s</div>{e}"), datapoints);
         write_javascript = true;
@@ -1845,7 +1866,7 @@ void ZigbeeShow(bool json)
         "(function(){"
           "r=(a,n)=>{return a.slice(n,a.length).concat(a.slice(0,n))}"
           "Array.from(document.getElementsByClassName('hm')).forEach(e=>{"
-            "e.innerHTML=r(...e.innerHTML.split(' ')).split('').map(v=>`<i class='i${v}'></i>`).join('');"
+            "e.innerHTML=r(...e.innerHTML.split(' ')).split('').map(v=>`<i class='i${Math.floor(parseInt(v, 16)/4)}'></i>`).join('');"
             "e.classList.add('v')"
           "});"
         "})();"
@@ -1870,6 +1891,11 @@ bool Xdrv23(uint8_t function)
       case FUNC_EVERY_50_MSECOND:
         if (!zigbee.init_phase) {
           zigbee_devices.runTimer();
+        }
+        break;
+      case FUNC_EVERY_SECOND:
+        if(!zigbee.init_phase) {
+          fixupOccupancy();
         }
         break;
       case FUNC_LOOP:

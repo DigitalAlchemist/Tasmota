@@ -1932,6 +1932,12 @@ void Z_postProcessAttributes(uint16_t shortaddr, uint16_t src_ep, class Z_attrib
         case 0x00010021: device.setBatteryPercent(uval16 / 2);                        break;
         case 0x00060000:
         case 0x00068000: device.setPower(attr.getBool(), src_ep);                     break;
+        case 0x04060000:
+          Z_Data_PIR & pir = (Z_Data_PIR&) device.data.getByType(Z_Data_Type::Z_PIR);
+          if (&pir != nullptr) {
+            pir.setOccupancy(uval16);
+          }
+          break;
       }
 
       // now apply the multiplier to make it human readable
