@@ -266,7 +266,9 @@ public:
   Z_Data_PIR(uint8_t endpoint = 0) :
     Z_Data(Z_Data_Type::Z_PIR, endpoint),
     occupancy(0xFF),
-    illuminance(0xFFFF)
+    illuminance(0xFFFF),
+    occupancy_index(0),
+    occupancy_time(0)
     {}
 
   inline bool validOccupancy(void)      const { return 0xFF != occupancy; }
@@ -277,6 +279,9 @@ public:
   
   inline void setOccupancy(uint8_t _occupancy)          { occupancy = _occupancy; }
   inline void setIlluminance(uint16_t _illuminance)     { illuminance = _illuminance; }
+  void setOccupancyIndex(uint8_t value, uint8_t index);
+  inline uint8_t getOccupancyIndex(uint8_t index) const;
+
 
   uint32_t getTimeoutSeconds(void) const;
   void setTimeoutSeconds(int32_t value);
@@ -285,6 +290,10 @@ public:
   // PIR
   uint8_t               occupancy;      // map8
   uint16_t              illuminance;    // illuminance
+  uint8_t               occupancy_today[48];
+  uint8_t               occupancy_index;
+  uint32_t              occupancy_time;
+
 };
 
 uint32_t Z_Data_PIR::getTimeoutSeconds(void) const {
@@ -304,6 +313,17 @@ void Z_Data_PIR::setTimeoutSeconds(int32_t value) {
     _config = val_15;
   }
 }
+
+void Z_Data_PIR::setOccupancyIndex(uint8_t value, uint8_t index) {
+  uint8_t temp;
+  temp = occupancy_today[index / 2];
+  occupancy_today[index / 2] = (temp & (0x0f << (4 * (index % 2)))) | ((value & 0x0f) << (4 * (1 - (index % 2))));
+}
+
+inline uint8_t Z_Data_PIR::getOccupancyIndex(uint8_t index) const {
+  return (occupancy_today[index / 2] >> (4 * (1 - (index % 2)))) & 0x0f;
+}
+
 
 /*********************************************************************************************\
  * Device specific: Sensors: temp, humidity, pressure...

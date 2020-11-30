@@ -1659,10 +1659,13 @@ void ZigbeeShow(bool json)
       ".htr{line-height:20px}"
       // Lighting
       ".bx{height:14px;width:14px;display:inline-block;border:1px solid currentColor;background-color:var(--cl,#fff)}"
-      // Signal Strength Indicator
-      ".ssi{display:inline-flex;align-items:flex-end;height:15px;padding:0}"
-      ".ssi i{width:3px;margin-right:1px;border-radius:3px;background-color:#eee}"
-      ".ssi .b0{height:25%%}.ssi .b1{height:50%%}.ssi .b2{height:75%%}.ssi .b3{height:100%%}.o30{opacity:.3}"
+      // CSS bar graphs for signal strength indicator or heatmaps
+      ".bar{display:inline-flex;align-items:flex-end;height:15px;padding:0;font-size:1pt}"
+      ".bar i{width:3px;margin-right:1px;border-radius:3px;background-color:#eee;height:100%}"
+      ".bar .i0{height:25%%}.bar .i1{height:50%%}.bar .i2{height:75%%}.o30{opacity:.3}"
+      ".v{visibility:visible}.hm{visibility:hidden}.hm .i0{background-color:#eee;opacity:.2}"
+      ".hm .i1{background-color:#d7e2fc}.hm .i2{background-color:#afc4f8}"
+      ".hm .i3{background-color:#86a7f5}.hm .i4{background-color:#5e89f1}"
       "</style>"
     ));
 
@@ -1674,6 +1677,7 @@ void ZigbeeShow(bool json)
     qsort(sorted_idx, zigbee_num, sizeof(sorted_idx[0]), device_cmp);
 
     uint32_t now = Rtc.utc_time;
+	bool write_javascript = false;
 
     for (uint32_t i = 0; i < zigbee_num; i++) {
       const Z_Device &device = zigbee_devices.devicesAt(sorted_idx[i]);
@@ -1709,7 +1713,7 @@ void ZigbeeShow(bool json)
         "<tr class='ztd htr'>"
           "<td><b title='0x%04X %s - %s'>%s</b></td>" // name
           "<td>%s</td>" // sbatt (Battery Indicator)
-          "<td><div title='" D_LQI " %s' class='ssi'>" // slqi
+          "<td><div title='" D_LQI " %s' class='bar'>" // slqi
       ), shortaddr,
       device.modelId ? device.modelId : "",
       device.manufacturerId ? device.manufacturerId : "",
@@ -1717,7 +1721,7 @@ void ZigbeeShow(bool json)
 
       if(device.validLqi()) {
           for(uint32_t j = 0; j < 4; ++j) {
-            WSContentSend_PD(PSTR("<i class='b%d%s'></i>"), j, (num_bars < j) ? PSTR(" o30") : PSTR(""));
+            WSContentSend_PD(PSTR("<i class='i%d%s'></i>"), j, (num_bars < j) ? PSTR(" o30") : PSTR(""));
           }
       }
       char dhm[48];
@@ -1738,6 +1742,21 @@ void ZigbeeShow(bool json)
       ), dhm );
 
       // Sensors
+      const Z_Data_PIR & pir = device.data.find<Z_Data_PIR>();
+      if(&pir != nullptr){
+        // 48 bytes * 2 bytes/sample + ' -' + 2 bytes counter (max 96) + '\0'
+        // Set data points array to all ASCII '0' (not null) to make parsing easier.
+        char datapoints[100];
+        memset(&datapoints[0], '0', 96);
+        for(int i = 0; i < pir.occupancy_index/2; ++i) {
+          snprintf_P(&datapoints[i], 2, PSTR("%02x"), i);
+        }
+        snprintf_P(&datapoints[96], 5, PSTR(" -%d"), pir.occupancy_index/2);
+        WSContentSend_P(PSTR("<tr class='htr'><td colspan=\"4\">&#9478;"));
+        WSContentSend_PD(PSTR("<div class='bar hm'>%s</div>{e}"), datapoints);
+        write_javascript = true;
+      }
+
       const Z_Data_Thermo & thermo = device.data.find<Z_Data_Thermo>();
 
       if (&thermo != nullptr) {
@@ -1819,7 +1838,20 @@ void ZigbeeShow(bool json)
         WSContentSend_P(PSTR("{e}"));
       }
     }
-
+    // If we have a PIR sensor, include this JS to ensure we render it properly.
+    if(write_javascript){
+      WSContentSend_P(PSTR(
+        "<script>"
+        "(function(){"
+          "r=(a,n)=>{return a.slice(n,a.length).concat(a.slice(0,n))}"
+          "Array.from(document.getElementsByClassName('hm')).forEach(e=>{"
+            "e.innerHTML=r(...e.innerHTML.split(' ')).split('').map(v=>`<i class='i${v}'></i>`).join('');"
+            "e.classList.add('v')"
+          "});"
+        "})();"
+        "</script>"
+      ));
+    }
     WSContentSend_P(PSTR("</table>{t}"));  // Terminate current multi column table and open new table
 #endif
   }
